@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stellar Slice</title>
+    <link href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-image: url('');
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Luckiest Guy', cursive;
+            color: white;
+            flex-direction: column;
+        }
+        canvas {
+            background-color: #0d1117;
+            border: 5px solid #30363d;
+            border-radius: 15px;
+            box-shadow: 0 0 30px rgba(88, 166, 255, 0.5);
+            touch-action: none; /* Disable default touch actions */
+            cursor: none;
+        }
+        .info-panel {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            justify-content: space-around;
+            width: 80%;
+            max-width: 600px;
+            font-size: 2em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+        .game-over-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            font-size: 3em;
+            display: none;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px 40px;
+            border-radius: 20px;
+            border: 2px solid #fff;
+        }
+        .start-button, .restart-button {
+            padding: 15px 30px;
+            font-size: 1.5em;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            background: linear-gradient(145deg, #4CAF50, #45a049);
+            color: white;
+            box-shadow: 5px 5px 15px #000, -5px -5px 15px #66bb6a;
+            transition: all 0.2s ease-in-out;
+            margin-top: 20px;
+            font-family: 'Luckiest Guy', cursive;
+        }
+        .start-button:hover, .restart-button:hover {
+            transform: scale(1.05);
+            box-shadow: 5px 5px 15px #000, -5px -5px 15px #fff;
+        }
+        .start-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px 40px;
+            border-radius: 20px;
+            border: 2px solid #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="info-panel">
+        <div id="score">Score: 0</div>
+        <div id="lives">Lives: ❤️❤️❤️</div>
+    </div>
+    <div class="start-screen" id="start-screen">
+        <h1>Fruit Ninja</h1>
+        <p>Slice the fruits, avoid the bombs!</p>
+        <button id="start-button" class="start-button">Start Game</button>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    <div class="game-over-screen" id="game-over-screen">
+        <h1 class="text-red-500">Game Over!</h1>
+        <p>Your score: <span id="final-score">0</span></p>
+        <button id="restart-button" class="restart-button">Play Again</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score');
+        const livesDisplay = document.getElementById('lives');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const startScreen = document.getElementById('start-screen');
+        const startButton = document.getElementById('start-button');
+        const restartButton = document.getElementById('restart-button');
+        const finalScoreDisplay = document.getElementById('final-score');
+
+        // Game state variables
+        let score = 0;
+        let lives = 3;
+        let fruits = [];
+        let particles = [];
+        let mouseX = 0;
+        let mouseY = 0;
+        let isDrawing = false;
+        let isGameOver = false;
+        let lastTimestamp = 0;
+        const trail = [];
+        let gameLoopId;
+
+        // Colors for various fruits and effects
+        const colors = {
+            apple: 'red',
+            orange: 'orange',
+            watermelon: 'green',
+            strawberry: 'pink',
+            bomb: 'black',
+            particle: '#fff'
+        };
+
+        // Resizes the canvas to fit the window
+        function resizeCanvas() {
+            canvas.width = window.innerWidth * 0.9;
+            canvas.height = window.innerHeight * 0.7;
+        }
+
+        // Fruit object constructor
+        class Fruit {
+            constructor(type) {
+                this.type = type;
+                this.isBomb = (type === 'bomb');
+                this.color = colors[type] || 'yellow';
+                this.radius = this.isBomb ? 30 : Math.random() * 20 + 20;
+                this.x = Math.random() * canvas.width;
+                this.y = canvas.height + this.radius;
+                this.vx = (Math.random() - 0.5) * 5;
+                this.vy = -Math.random() * 10 - 5;
+                this.gravity = 0.2;
+                this.sliced = false;
+            }
+
+            // Updates fruit position
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += this.gravity;
+            }
+
+            // Draws the fruit
+            draw() {
+                if (this.sliced) {
+                    this.drawSliced();
+                } else {
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.closePath();
+                }
+            }
+            
+            // Draws the two halves of a sliced fruit
+            drawSliced() {
+                const half1 = {
+                    x: this.x - this.vx * 2,
+                    y: this.y - this.vy * 2,
+                    vx: this.vx - 3,
+                    vy: this.vy - 3,
+                    angle: Math.random() * Math.PI * 2,
+                    color: this.color
+                };
+                const half2 = {
+                    x: this.x + this.vx * 2,
+                    y: this.y + this.vy * 2,
+                    vx: this.vx + 3,
+                    vy: this.vy + 3,
+                    angle: Math.random() * Math.PI * 2,
+                    color: this.color
+                };
+                
+                // Draw two rectangles to simulate halves
+                ctx.fillStyle = half1.color;
+                ctx.save();
+                ctx.translate(half1.x, half1.y);
+                ctx.rotate(half1.angle);
+                ctx.fillRect(-this.radius, -this.radius / 2, this.radius * 2, this.radius);
+                ctx.restore();
+
+                ctx.fillStyle = half2.color;
+                ctx.save();
+                ctx.translate(half2.x, half2.y);
+                ctx.rotate(half2.angle);
+                ctx.fillRect(-this.radius, -this.radius / 2, this.radius * 2, this.radius);
+                ctx.restore();
+            }
+        }
+
+        // Particle object for slice effect
+        class Particle {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 5;
+                this.vy = (Math.random() - 0.5) * 5;
+                this.size = Math.random() * 3 + 1;
+                this.alpha = 1;
+                this.life = 100;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.alpha -= 0.01;
+                this.life--;
+            }
+            draw() {
+                ctx.fillStyle = `rgba(255, 255, 255, ${this.alpha})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        // Generates a new fruit
+        function spawnFruit() {
+            const fruitTypes = ['apple', 'orange', 'watermelon', 'strawberry'];
+            const randomType = fruitTypes[Math.floor(Math.random() * fruitTypes.length)];
+            const newFruit = new Fruit(randomType);
+            fruits.push(newFruit);
+        }
+        
+        // Generates a new bomb
+        function spawnBomb() {
+            const newBomb = new Fruit('bomb');
+            fruits.push(newBomb);
+        }
+
+        // Slices a fruit and creates particles
+        function sliceFruit(fruit) {
+            fruit.sliced = true;
+            if (fruit.isBomb) {
+                lives = 0;
+            } else {
+                score++;
+                for (let i = 0; i < 20; i++) {
+                    particles.push(new Particle(fruit.x, fruit.y));
+                }
+            }
+        }
+        
+        // Main game loop
+        function gameLoop(timestamp) {
+            const deltaTime = timestamp - lastTimestamp;
+            lastTimestamp = timestamp;
+
+            if (isGameOver) {
+                cancelAnimationFrame(gameLoopId);
+                return;
+            }
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Update and draw fruits
+            fruits.forEach((fruit, index) => {
+                if (fruit.y > canvas.height + fruit.radius) {
+                    if (!fruit.isBomb && !fruit.sliced) {
+                        lives--;
+                    }
+                    fruits.splice(index, 1);
+                } else if (!fruit.sliced) {
+                    fruit.update();
+                }
+                fruit.draw();
+            });
+
+            // Update and draw particles
+            particles.forEach((particle, index) => {
+                particle.update();
+                particle.draw();
+                if (particle.life <= 0) {
+                    particles.splice(index, 1);
+                }
+            });
+
+            // Draw the mouse trail
+            if (isDrawing) {
+                ctx.lineWidth = 5;
+                ctx.strokeStyle = '#fff';
+                ctx.shadowColor = 'rgba(255, 255, 255, 0.7)';
+                ctx.shadowBlur = 10;
+                ctx.beginPath();
+                for (let i = 1; i < trail.length; i++) {
+                    ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+                    ctx.lineTo(trail[i].x, trail[i].y);
+                }
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            }
+
+            // Check for game over
+            if (lives <= 0) {
+                gameOver();
+            }
+
+            // Update UI
+            updateUI();
+
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        // Updates the score and lives display
+        function updateUI() {
+            scoreDisplay.textContent = `Score: ${score}`;
+            livesDisplay.textContent = `Lives: ${'❤️'.repeat(lives)}${'🤍'.repeat(3 - lives)}`;
+        }
+
+        // Game over state
+        function gameOver() {
+            isGameOver = true;
+            cancelAnimationFrame(gameLoopId);
+            gameOverScreen.style.display = 'block';
+            finalScoreDisplay.textContent = score;
+        }
+
+        // Starts or restarts the game
+        function startGame() {
+            isGameOver = false;
+            score = 0;
+            lives = 3;
+            fruits = [];
+            particles = [];
+            gameOverScreen.style.display = 'none';
+            startScreen.style.display = 'none';
+            updateUI();
+            
+            // Spawn fruits on a timer
+            setInterval(() => {
+                const random = Math.random();
+                if (random < 0.8) {
+                    spawnFruit();
+                } else {
+                    spawnBomb();
+                }
+            }, 1000);
+            
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        // Event listeners for slicing
+        function handleStart(e) {
+            e.preventDefault();
+            isDrawing = true;
+            const pos = getMousePos(e);
+            mouseX = pos.x;
+            mouseY = pos.y;
+            trail.push({ x: mouseX, y: mouseY });
+        }
+
+        function handleMove(e) {
+            e.preventDefault();
+            if (!isDrawing) return;
+            const pos = getMousePos(e);
+            const prevX = mouseX;
+            const prevY = mouseY;
+            mouseX = pos.x;
+            mouseY = pos.y;
+            trail.push({ x: mouseX, y: mouseY });
+            if (trail.length > 10) trail.shift();
+
+            fruits.forEach(fruit => {
+                if (fruit.sliced) return;
+                const dist = Math.sqrt((mouseX - fruit.x)**2 + (mouseY - fruit.y)**2);
+                const prevDist = Math.sqrt((prevX - fruit.x)**2 + (prevY - fruit.y)**2);
+
+                if (dist < fruit.radius && prevDist > fruit.radius) {
+                    sliceFruit(fruit);
+                }
+            });
+        }
+
+        function handleEnd(e) {
+            isDrawing = false;
+            trail.length = 0;
+        }
+
+        // Helper function to get mouse/touch position
+        function getMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            if (e.touches) {
+                return {
+                    x: e.touches[0].clientX - rect.left,
+                    y: e.touches[0].clientY - rect.top
+                };
+            }
+            return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+        }
+
+        // Add event listeners
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        canvas.addEventListener('mouseup', handleEnd);
+        canvas.addEventListener('mouseleave', handleEnd);
+
+        canvas.addEventListener('touchstart', handleStart);
+        canvas.addEventListener('touchmove', handleMove);
+        canvas.addEventListener('touchend', handleEnd);
+
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', startGame);
+
+        window.addEventListener('resize', resizeCanvas);
+        window.onload = resizeCanvas;
+    </script>
+</body>
+</html>
